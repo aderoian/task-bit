@@ -10,6 +10,12 @@
     let state = { notebooks: [], activeNotebookId: null };
     /** @type {Record<string, Sortable>} */
     let sortables = {};
+    const ui = {
+        editingItemKey: null,
+        editingListKey: null,
+        pendingItemKey: null,
+        pendingListKey: null,
+    };
 
     const taskbit = window.TASKBIT || { loggedIn: false, initialState: null };
 
@@ -162,6 +168,14 @@
         });
     }
 
+    function keyForList(notebookId, listId) {
+        return String(notebookId) + '::' + String(listId);
+    }
+
+    function keyForItem(notebookId, listId, itemId) {
+        return String(notebookId) + '::' + String(listId) + '::' + String(itemId);
+    }
+
     async function api(path, opts) {
         const res = await fetch(path, {
             credentials: 'same-origin',
@@ -213,14 +227,6 @@
         });
     }
 
-    function esc(s) {
-        return String(s)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
-    }
-
     function itemTitleMaxHeightPx() {
         var h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
         var rootFs = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
@@ -228,14 +234,86 @@
         return Math.max(96, cssCap);
     }
 
+    var measureCanvas;
+    function maxLinePx(el, text) {
+        if (!measureCanvas) measureCanvas = document.createElement('canvas');
+        const ctx = measureCanvas.getContext('2d');
+        if (!ctx) return 0;
+        const style = getComputedStyle(el);
+        ctx.font = style.font || [style.fontStyle, style.fontVariant, style.fontWeight, style.fontSize, style.fontFamily].join(' ');
+        return String(text || '')
+            .split('\n')
+            .reduce(function (max, line) {
+                return Math.max(max, Math.ceil(ctx.measureText(line || ' ').width));
+            }, 0);
+    }
+
+    function itemTitleMaxWidthPx() {
+        var w = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+        var rootFs = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+        var cssCap = Math.round(w - 8.5 * rootFs);
+        return Math.max(220, Math.min(560, cssCap));
+    }
+
+    function itemTitleContainerMaxWidthPx(el) {
+        const row = el.closest('.todo-item');
+        if (!row) return Infinity;
+        const col = el.closest('.list-column');
+        const colWidth = col ? col.clientWidth : 0;
+        if (!colWidth) return Infinity;
+        const rowStyle = getComputedStyle(row);
+        const gap = parseFloat(rowStyle.columnGap || rowStyle.gap) || 0;
+        const rowPad =
+            (parseFloat(rowStyle.paddingLeft) || 0) +
+            (parseFloat(rowStyle.paddingRight) || 0) +
+            (parseFloat(rowStyle.borderLeftWidth) || 0) +
+            (parseFloat(rowStyle.borderRightWidth) || 0);
+        let occupied = 0;
+        Array.from(row.children).forEach(function (child) {
+            if (child === el) return;
+            occupied += child.getBoundingClientRect().width;
+        });
+        const interItemGaps = Math.max(0, row.children.length - 1) * gap;
+        return Math.max(120, Math.floor(colWidth - rowPad - occupied - interItemGaps - 2));
+    }
+
     function autoResizeTextarea(el) {
         if (!el || el.tagName !== 'TEXTAREA') return;
+        const style = getComputedStyle(el);
+        const minW = Math.round((parseFloat(style.fontSize) || 16) * 8.5);
+        const pad = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+        const border = (parseFloat(style.borderLeftWidth) || 0) + (parseFloat(style.borderRightWidth) || 0);
+        const textW = maxLinePx(el, el.value);
+        const maxW = Math.min(itemTitleMaxWidthPx(), itemTitleContainerMaxWidthPx(el));
+        const nextW = Math.min(Math.max(textW + pad + border + 8, minW), maxW);
+        el.style.width = nextW + 'px';
         var max = itemTitleMaxHeightPx();
         el.style.height = 'auto';
         var sh = el.scrollHeight;
         var next = Math.min(sh, max);
         el.style.height = next + 'px';
         el.style.overflowY = sh > max ? 'auto' : 'hidden';
+    }
+
+    function setInlineReadonly(el, isReadonly) {
+        el.readOnly = isReadonly;
+        el.classList.toggle('is-readonly', isReadonly);
+    }
+
+    function focusAndSelect(el) {
+        if (!el) return;
+        try {
+            el.focus({ preventScroll: true });
+        } catch (_) {
+            el.focus();
+        }
+        if (typeof el.select === 'function') {
+            el.select();
+            return;
+        }
+        if (typeof el.setSelectionRange === 'function') {
+            el.setSelectionRange(0, String(el.value || '').length);
+        }
     }
 
     var resizeTitlesTimer;
@@ -307,18 +385,65 @@
 
             const header = document.createElement('div');
             header.className = 'list-header';
-            header.innerHTML =
-                '<span class="icon-btn list-column-handle" title="Reorder list" aria-label="Reorder list">☰</span>' +
-                '<h2 class="list-title" title="Rename list">' +
-                esc(list.name) +
-                '</h2>' +
-                '<button type="button" class="icon-btn list-del" title="Delete list">\u00d7</button>';
-            header.querySelector('.list-title').addEventListener('click', function () {
-                renameList(list.id);
+            const handle = document.createElement('span');
+            handle.className = 'icon-btn list-column-handle';
+            handle.title = 'Reorder list';
+            handle.setAttribute('aria-label', 'Reorder list');
+            handle.textContent = '☰';
+            const title = document.createElement('input');
+            title.className = 'list-title-input';
+            title.type = 'text';
+            title.spellcheck = false;
+            title.value = list.name || '';
+            const listKey = keyForList(nb.id, list.id);
+            title.dataset.listKey = listKey;
+            setInlineReadonly(title, ui.editingListKey !== listKey);
+            title.addEventListener('dblclick', function () {
+                ui.editingListKey = listKey;
+                setInlineReadonly(title, false);
+                focusAndSelect(title);
             });
-            header.querySelector('.list-del').addEventListener('click', function () {
+            title.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Escape' && !title.readOnly) {
+                    ev.preventDefault();
+                    title.dataset.cancelEdit = '1';
+                    title.value = list.name || '';
+                    title.blur();
+                    return;
+                }
+                if (ev.key === 'Enter' && !ev.shiftKey && !title.readOnly) {
+                    ev.preventDefault();
+                    title.blur();
+                }
+            });
+            title.addEventListener('blur', function () {
+                if (title.dataset.cancelEdit === '1') {
+                    title.dataset.cancelEdit = '';
+                    ui.editingListKey = null;
+                    setInlineReadonly(title, true);
+                    return;
+                }
+                if (title.readOnly) return;
+                updateListName(nb.id, list.id, title.value)
+                    .catch(function (e) {
+                        toast(e.message || 'Could not rename list');
+                    })
+                    .finally(function () {
+                        ui.editingListKey = null;
+                        render();
+                    });
+            });
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'icon-btn list-del';
+            delBtn.title = 'Delete list';
+            delBtn.textContent = '×';
+            delBtn.addEventListener('click', function () {
                 deleteList(list.id);
             });
+            header.appendChild(handle);
+            header.appendChild(title);
+            header.appendChild(delBtn);
 
             const ul = document.createElement('div');
             ul.className = 'item-list';
@@ -358,16 +483,58 @@
         const ta = row.querySelector('.item-title');
         ta.value = it.title || '';
         autoResizeTextarea(ta);
+        const itemKey = keyForItem(nb.id, list.id, it.id);
+        ta.dataset.itemKey = itemKey;
+        setInlineReadonly(ta, ui.editingItemKey !== itemKey);
+        if (ui.editingItemKey === itemKey) {
+            row.classList.add('editing');
+        }
         ta.addEventListener('input', function () {
             autoResizeTextarea(ta);
+        });
+        ta.addEventListener('dblclick', function () {
+            ui.editingItemKey = itemKey;
+            setInlineReadonly(ta, false);
+            row.classList.add('editing');
+            autoResizeTextarea(ta);
+            focusAndSelect(ta);
+        });
+        ta.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Escape' && !ta.readOnly) {
+                ev.preventDefault();
+                ta.dataset.cancelEdit = '1';
+                ta.value = it.title || '';
+                autoResizeTextarea(ta);
+                ta.blur();
+                return;
+            }
+            if (ev.key === 'Enter' && !ev.shiftKey && !ta.readOnly) {
+                ev.preventDefault();
+                ta.blur();
+            }
         });
         const check = row.querySelector('.item-check');
         check.addEventListener('change', function () {
             row.classList.toggle('done', check.checked);
             updateItemCompletion(nb.id, list.id, it.id, check.checked);
         });
-        ta.addEventListener('change', function () {
-            updateItemTitle(nb.id, list.id, it.id, ta.value);
+        ta.addEventListener('blur', function () {
+            if (ta.dataset.cancelEdit === '1') {
+                ta.dataset.cancelEdit = '';
+                ui.editingItemKey = null;
+                setInlineReadonly(ta, true);
+                row.classList.remove('editing');
+                return;
+            }
+            if (ta.readOnly) return;
+            updateItemTitle(nb.id, list.id, it.id, ta.value)
+                .catch(function (e) {
+                    toast(e.message || 'Could not save task');
+                })
+                .finally(function () {
+                    ui.editingItemKey = null;
+                    render();
+                });
         });
         row.querySelector('.item-del').addEventListener('click', function () {
             deleteItem(nb.id, list.id, it.id);
@@ -577,6 +744,34 @@
         }
     }
 
+    function focusPendingInlineEditors() {
+        if (ui.pendingListKey) {
+            const key = ui.pendingListKey;
+            ui.pendingListKey = null;
+            ui.editingListKey = key;
+            document.querySelectorAll('#board .list-title-input').forEach(function (el) {
+                if (el.dataset.listKey === key) {
+                    setInlineReadonly(el, false);
+                    focusAndSelect(el);
+                }
+            });
+        }
+        if (ui.pendingItemKey) {
+            const key = ui.pendingItemKey;
+            ui.pendingItemKey = null;
+            ui.editingItemKey = key;
+            document.querySelectorAll('#board .item-title').forEach(function (el) {
+                if (el.dataset.itemKey === key) {
+                    setInlineReadonly(el, false);
+                    autoResizeTextarea(el);
+                    focusAndSelect(el);
+                    const row = el.closest('.todo-item');
+                    if (row) row.classList.add('editing');
+                }
+            });
+        }
+    }
+
     function render() {
         normalizePositions(getActiveNotebook() || { lists: [] });
         renderTabs();
@@ -585,6 +780,7 @@
         document.querySelectorAll('#board .item-title').forEach(function (ta) {
             autoResizeTextarea(ta);
         });
+        focusPendingInlineEditors();
     }
 
     function bindViewportResizeForTitles() {
@@ -656,9 +852,8 @@
             toast('Guest limit: ' + MAX_GUEST_LISTS + ' lists max. Sign in for more.');
             return;
         }
-        const name = prompt('List name', 'New list');
-        if (name === null) return;
-        const trimmed = String(name).trim() || 'New list';
+        const trimmed = 'Untitled List';
+        let createdListId = null;
         try {
             if (taskbit.loggedIn) {
                 const data = await api('/api/notebooks/' + encodeURIComponent(nb.id) + '/lists', {
@@ -666,6 +861,7 @@
                     body: JSON.stringify({ name: trimmed }),
                 });
                 if (data.state) initStateFromServer(data.state);
+                createdListId = data.id;
             } else {
                 const list = {
                     id: uid('gl'),
@@ -676,22 +872,26 @@
                 nb.lists = nb.lists || [];
                 nb.lists.push(list);
                 persistGuest();
+                createdListId = list.id;
             }
         } catch (e) {
             toast(e.message || 'Could not create list');
         }
+        if (createdListId !== null) {
+            ui.pendingListKey = keyForList(nb.id, createdListId);
+        }
         render();
     }
 
-    async function renameList(listId) {
-        const nb = getActiveNotebook();
-        if (!nb) return;
-        const list = findList(nb.id, listId);
-        if (!list) return;
-        const name = prompt('Rename list', list.name);
-        if (name === null) return;
+    async function updateListName(notebookId, listId, name) {
+        const list = findList(notebookId, listId);
+        if (!list) return false;
         const trimmed = String(name).trim();
-        if (!trimmed) return;
+        if (!trimmed) {
+            toast('List title cannot be empty.');
+            return false;
+        }
+        if (trimmed === String(list.name || '').trim()) return true;
         try {
             if (taskbit.loggedIn) {
                 const data = await api('/api/lists/' + encodeURIComponent(listId), {
@@ -705,8 +905,9 @@
             }
         } catch (e) {
             toast(e.message || 'Could not rename list');
+            return false;
         }
-        render();
+        return true;
     }
 
     async function deleteList(listId) {
@@ -735,10 +936,8 @@
         if (!nb) return;
         const list = findList(nb.id, listId);
         if (!list) return;
-        const title = prompt('Task', '');
-        if (title === null) return;
-        const trimmed = String(title).trim();
-        if (!trimmed) return;
+        const trimmed = 'Untitled Task';
+        let createdItemId = null;
         try {
             if (taskbit.loggedIn) {
                 const data = await api('/api/lists/' + encodeURIComponent(listId) + '/items', {
@@ -746,18 +945,24 @@
                     body: JSON.stringify({ title: trimmed }),
                 });
                 if (data.state) initStateFromServer(data.state);
+                createdItemId = data.id;
             } else {
                 list.items = list.items || [];
-                list.items.push({
+                const item = {
                     id: uid('gi'),
                     title: trimmed,
                     completed: false,
                     position: list.items.length,
-                });
+                };
+                list.items.push(item);
                 persistGuest();
+                createdItemId = item.id;
             }
         } catch (e) {
             toast(e.message || 'Could not add task');
+        }
+        if (createdItemId !== null) {
+            ui.pendingItemKey = keyForItem(nb.id, listId, createdItemId);
         }
         render();
     }
@@ -787,17 +992,17 @@
 
     async function updateItemTitle(notebookId, listId, itemId, title) {
         const list = findList(notebookId, listId);
-        if (!list) return;
+        if (!list) return false;
         const it = (list.items || []).find(function (x) {
             return x.id === itemId;
         });
-        if (!it) return;
+        if (!it) return false;
         const trimmed = String(title).trim();
         if (!trimmed) {
             toast('Task title cannot be empty.');
-            render();
-            return;
+            return false;
         }
+        if (trimmed === String(it.title || '').trim()) return true;
         it.title = trimmed;
         if (taskbit.loggedIn) {
             try {
@@ -808,10 +1013,12 @@
                 if (data.state) initStateFromServer(data.state);
             } catch (e) {
                 toast(e.message || 'Could not save task');
+                return false;
             }
         } else {
             persistGuest();
         }
+        return true;
     }
 
     async function deleteItem(notebookId, listId, itemId) {
