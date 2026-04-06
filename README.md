@@ -72,4 +72,4 @@ SQLite is stored at `/var/www/data/app.sqlite` inside the container (persisted w
 
 ## License
 
-MIT (or your choice).
+[MIT](./LICENSE)
