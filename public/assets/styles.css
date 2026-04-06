@@ -39,10 +39,11 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 1.5rem 0.75rem;
+    padding: 1rem clamp(0.75rem, 3vw, 1.5rem) 0.75rem;
     max-width: 1200px;
     margin: 0 auto;
     gap: 1rem;
+    flex-wrap: wrap;
 }
 
 .brand {
@@ -62,7 +63,7 @@ html, body {
 
 .brand-title {
     font-family: var(--font-hand);
-    font-size: 2rem;
+    font-size: clamp(1.5rem, 4.5vw + 0.5rem, 2rem);
     margin: 0;
     line-height: 1;
 }
@@ -77,6 +78,7 @@ html, body {
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    flex-wrap: wrap;
 }
 
 .user-chip {
@@ -94,7 +96,7 @@ html, body {
 .main-wrap {
     max-width: 1200px;
     margin: 0 auto 2rem;
-    padding: 0 1rem 2rem;
+    padding: 0 clamp(0.65rem, 2.5vw, 1rem) 2rem;
 }
 
 .sheet-rise {
@@ -206,7 +208,7 @@ html, body {
 
 .note-tab {
     font-family: var(--font-hand);
-    font-size: 1.35rem;
+    font-size: clamp(1.1rem, 2.5vw + 0.35rem, 1.35rem);
     padding: 0.2rem 0.75rem 0.35rem;
     background: var(--paper-accent);
     border-radius: 8px 8px 4px 4px;
@@ -237,8 +239,10 @@ html, body {
     display: flex;
     gap: 1rem;
     overflow-x: auto;
+    overflow-y: visible;
     padding: 0.25rem 0.25rem 0.5rem 52px;
     align-items: flex-start;
+    scrollbar-gutter: stable;
 }
 
 .list-column.sortable-ghost {
@@ -247,15 +251,19 @@ html, body {
 }
 
 .list-column {
-    flex: 0 0 280px;
+    flex: 0 0 min(280px, max(240px, calc(100vw - 5.5rem)));
+    align-self: flex-start;
     background: rgba(255, 255, 255, 0.65);
     border: 1px solid rgba(0, 0, 0, 0.06);
     border-radius: 10px;
     padding: 0.65rem 0.6rem;
     animation: colIn 0.35s ease both;
-    max-height: min(70vh, 640px);
+    max-height: min(92vh, 900px);
     display: flex;
     flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    min-height: 0;
 }
 
 @keyframes colIn {
@@ -276,23 +284,30 @@ html, body {
     gap: 0.5rem;
     margin-bottom: 0.5rem;
     padding: 0 0.15rem;
+    flex-shrink: 0;
 }
 
 .list-title {
     font-family: var(--font-hand);
-    font-size: 1.45rem;
+    font-size: clamp(1.15rem, 2.8vw + 0.4rem, 1.45rem);
     margin: 0;
     cursor: pointer;
     flex: 1;
+    min-width: 0;
 }
 
 .item-list {
-    flex: 1;
-    overflow-y: auto;
+    flex: 0 0 auto;
     min-height: 120px;
+    min-width: 0;
     padding: 0.25rem;
     margin: 0 -0.15rem;
     border-radius: 8px;
+    overflow: visible;
+}
+
+.list-footer {
+    flex-shrink: 0;
 }
 
 .todo-item {
@@ -306,6 +321,10 @@ html, body {
     border: 1px dashed rgba(0, 0, 0, 0.06);
     transition: transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
     animation: itemIn 0.28s ease both;
+    min-width: 0;
+    width: 100%;
+    max-width: min(100%, 100vw);
+    box-sizing: border-box;
 }
 
 @keyframes itemIn {
@@ -342,7 +361,9 @@ html, body {
 }
 
 .item-title {
-    flex: 1;
+    flex: 1 1 0%;
+    min-width: 0;
+    max-width: min(100%, 100vw);
     font-size: 0.98rem;
     line-height: 1.35;
     border: none;
@@ -350,7 +371,13 @@ html, body {
     font-family: inherit;
     resize: none;
     min-height: 2.4rem;
-    width: 100%;
+    max-height: min(calc(100svh - 7.5rem), calc(100vh - 7.5rem));
+    overflow-wrap: break-word;
+    word-break: break-word;
+    white-space: pre-wrap;
+    overflow-x: hidden;
+    overflow-y: hidden;
+    box-sizing: border-box;
 }
 
 .btn {
@@ -521,5 +548,33 @@ html, body {
     .notebook-toolbar,
     .board {
         padding-left: 18px;
+    }
+}
+
+@media (max-width: 640px) {
+    .top-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .nav-actions {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .board {
+        flex-direction: column;
+        align-items: stretch;
+        overflow-x: visible;
+        padding-right: 0.25rem;
+    }
+
+    .list-column {
+        flex: 1 1 auto;
+        width: 100%;
+        max-width: 100%;
+        min-height: 0;
+        max-height: min(92vh, 900px);
+        overflow-y: auto;
     }
 }

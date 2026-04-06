@@ -221,6 +221,33 @@
             .replace(/"/g, '&quot;');
     }
 
+    function itemTitleMaxHeightPx() {
+        var h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+        var rootFs = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+        var cssCap = Math.round(h - 7.5 * rootFs);
+        return Math.max(96, cssCap);
+    }
+
+    function autoResizeTextarea(el) {
+        if (!el || el.tagName !== 'TEXTAREA') return;
+        var max = itemTitleMaxHeightPx();
+        el.style.height = 'auto';
+        var sh = el.scrollHeight;
+        var next = Math.min(sh, max);
+        el.style.height = next + 'px';
+        el.style.overflowY = sh > max ? 'auto' : 'hidden';
+    }
+
+    var resizeTitlesTimer;
+    function scheduleResizeAllItemTitles() {
+        clearTimeout(resizeTitlesTimer);
+        resizeTitlesTimer = setTimeout(function () {
+            document.querySelectorAll('#board .item-title').forEach(function (ta) {
+                autoResizeTextarea(ta);
+            });
+        }, 100);
+    }
+
     function renderTabs() {
         const host = document.getElementById('notebook-tabs');
         const addBtn = document.getElementById('btn-add-notebook');
@@ -303,6 +330,7 @@
             });
 
             const addRow = document.createElement('div');
+            addRow.className = 'list-footer';
             addRow.innerHTML =
                 '<button type="button" class="btn btn-secondary" style="width:100%;margin-top:0.4rem">+ Task</button>';
             addRow.querySelector('button').addEventListener('click', function () {
@@ -329,6 +357,10 @@
             '<button type="button" class="icon-btn item-del no-drag" title="Delete">\u00d7</button>';
         const ta = row.querySelector('.item-title');
         ta.value = it.title || '';
+        autoResizeTextarea(ta);
+        ta.addEventListener('input', function () {
+            autoResizeTextarea(ta);
+        });
         const check = row.querySelector('.item-check');
         check.addEventListener('change', function () {
             row.classList.toggle('done', check.checked);
@@ -550,6 +582,16 @@
         renderTabs();
         renderBoard();
         setupSortables();
+        document.querySelectorAll('#board .item-title').forEach(function (ta) {
+            autoResizeTextarea(ta);
+        });
+    }
+
+    function bindViewportResizeForTitles() {
+        window.addEventListener('resize', scheduleResizeAllItemTitles);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', scheduleResizeAllItemTitles);
+        }
     }
 
     async function addNotebook() {
@@ -837,6 +879,7 @@
             });
         });
 
+        bindViewportResizeForTitles();
         render();
     }
 

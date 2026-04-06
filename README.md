@@ -25,7 +25,13 @@ Optional env:
 
 ## Docker
 
-Build and run:
+Compose (recommended):
+
+```bash
+docker compose up --build
+```
+
+Or build and run manually:
 
 ```bash
 docker build -t taskbit .
@@ -36,7 +42,7 @@ docker run --rm -p 8080:80 \
 
 Then open `http://localhost:8080`.
 
-SQLite is stored at `/var/www/data/app.sqlite` inside the container (persisted with the volume).
+SQLite is stored at `/var/www/data/app.sqlite` inside the container (persisted with the Compose named volume or the `docker run` volume).
 
 ## Features
 

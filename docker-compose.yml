@@ -1,0 +1,10 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8080:80"
+    volumes:
+      - taskbit-data:/var/www/data
+
+volumes:
+  taskbit-data:
