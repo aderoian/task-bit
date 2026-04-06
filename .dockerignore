@@ -1,0 +1,7 @@
+database/*.sqlite
+database/*.sqlite-journal
+storage/sessions/sess_*
+.git
+.cursor
+*.md
+!README.md
